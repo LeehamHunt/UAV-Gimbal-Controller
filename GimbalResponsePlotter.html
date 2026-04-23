@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gimbal PID Response Plotter</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        .container {
+            background: #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #4CAF50;
+            margin-top: 0;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .control-group {
+            background: #333;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        .btn-danger {
+            background: #f44336;
+        }
+        .btn-danger:hover {
+            background: #da190b;
+        }
+        #serialLog {
+            background: #1a1a1a;
+            color: #0f0;
+            padding: 10px;
+            height: 100px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .stat-box {
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #888;
+        }
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 20px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #aaa;
+            font-size: 14px;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 3px;
+            color: #e0e0e0;
+            box-sizing: border-box;
+        }
+        .info {
+            background: #1a4d7a;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196F3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 Gimbal PID Response Plotter</h1>
+        
+        <div class="info">
+            <strong>How to use:</strong>
+            <ol style="margin: 10px 0;">
+                <li>Click "Connect Serial" and select your Arduino port (requires Chrome/Edge browser)</li>
+                <li>Paste serial data manually OR use Web Serial API for real-time plotting</li>
+                <li>Watch the step response to tune PID gains</li>
+                <li>Export data for further analysis</li>
+            </ol>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label>Serial Connection</label>
+                <button id="connectBtn" onclick="connectSerial()">Connect Serial</button>
+                <button id="disconnectBtn" onclick="disconnectSerial()" style="display:none;" class="btn-danger">Disconnect</button>
+                <div style="margin-top: 10px; font-size: 12px; color: #888;" id="connectionStatus">Not connected</div>
+            </div>
+            
+            <div class="control-group">
+                <label>Data Controls</label>
+                <button onclick="clearData()">Clear Data</button>
+                <button onclick="exportData()">Export CSV</button>
+            </div>
+            
+            <div class="control-group">
+                <label>Time Window (seconds)</label>
+                <input type="number" id="timeWindow" value="10" min="1" max="60" step="1" onchange="updateTimeWindow()">
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="responseChart"></canvas>
+        </div>
+
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-label">Overshoot</div>
+                <div class="stat-value" id="overshoot">-</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Settling Time</div>
+                <div class="stat-value" id="settlingTime">-</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Rise Time</div>
+                <div class="stat-value" id="riseTime">-</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Steady Error</div>
+                <div class="stat-value" id="steadyError">-</div>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label>Paste Serial Data (Format: R:10.5 T:0.725 A:0.720 E:0.005 V:5.2 Vq:3.1)</label>
+            <textarea id="serialData" rows="4" placeholder="Paste serial output here..."></textarea>
+            <button onclick="parseSerialData()" style="margin-top: 10px;">Parse & Plot</button>
+        </div>
+
+        <div id="serialLog"></div>
+    </div>
+
+    <script>
+        let port;
+        let reader;
+        let keepReading = false;
+        let dataBuffer = '';
+        
+        const maxDataPoints = 1000;
+        let timeWindow = 10; // seconds
+        let startTime = Date.now();
+        
+        let data = {
+            time: [],
+            target: [],
+            actual: [],
+            error: [],
+            velocity: [],
+            voltage: []
+        };
+
+        const ctx = document.getElementById('responseChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                datasets: [
+                    {
+                        label: 'Target Position',
+                        data: [],
+                        borderColor: '#FF6384',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.1
+                    },
+                    {
+                        label: 'Actual Position',
+                        data: [],
+                        borderColor: '#36A2EB',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.1
+                    },
+                    {
+                        label: 'Error (x10)',
+                        data: [],
+                        borderColor: '#FFCE56',
+                        backgroundColor: 'rgba(255, 206, 86, 0.1)',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        tension: 0.1,
+                        hidden: true
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: {
+                            display: true,
+                            text: 'Time (s)',
+                            color: '#aaa'
+                        },
+                        grid: {
+                            color: '#333'
+                        },
+                        ticks: {
+                            color: '#aaa'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Position (rad)',
+                            color: '#aaa'
+                        },
+                        grid: {
+                            color: '#333'
+                        },
+                        ticks: {
+                            color: '#aaa'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: '#e0e0e0'
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false
+                    }
+                }
+            }
+        });
+
+        async function connectSerial() {
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 });
+                
+                document.getElementById('connectBtn').style.display = 'none';
+                document.getElementById('disconnectBtn').style.display = 'inline-block';
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                document.getElementById('connectionStatus').style.color = '#4CAF50';
+                
+                keepReading = true;
+                readSerial();
+            } catch (error) {
+                logSerial('Error: ' + error.message);
+                alert('Failed to connect. Make sure you\'re using Chrome/Edge and have selected a port.');
+            }
+        }
+
+        async function disconnectSerial() {
+            keepReading = false;
+            if (reader) {
+                await reader.cancel();
+            }
+            if (port) {
+                await port.close();
+            }
+            
+            document.getElementById('connectBtn').style.display = 'inline-block';
+            document.getElementById('disconnectBtn').style.display = 'none';
+            document.getElementById('connectionStatus').textContent = 'Not connected';
+            document.getElementById('connectionStatus').style.color = '#888';
+        }
+
+        async function readSerial() {
+            const textDecoder = new TextDecoderStream();
+            const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+            reader = textDecoder.readable.getReader();
+
+            try {
+                while (keepReading) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    dataBuffer += value;
+                    let lines = dataBuffer.split('\n');
+                    dataBuffer = lines.pop();
+                    
+                    for (let line of lines) {
+                        if (line.trim()) {
+                            processLine(line.trim());
+                        }
+                    }
+                }
+            } catch (error) {
+                logSerial('Read error: ' + error.message);
+            } finally {
+                reader.releaseLock();
+            }
+        }
+
+        function processLine(line) {
+            logSerial(line);
+            
+            // Parse format: R:10.5 T:0.725 A:0.720 E:0.005 V:5.2 Vq:3.1
+            const rollMatch = line.match(/R:([-\d.]+)/);
+            const targetMatch = line.match(/T:([-\d.]+)/);
+            const actualMatch = line.match(/A:([-\d.]+)/);
+            const errorMatch = line.match(/E:([-\d.]+)/);
+            const velMatch = line.match(/V:([-\d.]+)/);
+            const vqMatch = line.match(/Vq:([-\d.]+)/);
+            
+            if (targetMatch && actualMatch) {
+                const currentTime = (Date.now() - startTime) / 1000;
+                
+                data.time.push(currentTime);
+                data.target.push(parseFloat(targetMatch[1]));
+                data.actual.push(parseFloat(actualMatch[1]));
+                data.error.push(errorMatch ? parseFloat(errorMatch[1]) * 10 : 0);
+                data.velocity.push(velMatch ? parseFloat(velMatch[1]) : 0);
+                data.voltage.push(vqMatch ? parseFloat(vqMatch[1]) : 0);
+                
+                // Keep only data within time window
+                const cutoffTime = currentTime - timeWindow;
+                while (data.time.length > 0 && data.time[0] < cutoffTime) {
+                    data.time.shift();
+                    data.target.shift();
+                    data.actual.shift();
+                    data.error.shift();
+                    data.velocity.shift();
+                    data.voltage.shift();
+                }
+                
+                updateChart();
+                calculateMetrics();
+            }
+        }
+
+        function parseSerialData() {
+            const input = document.getElementById('serialData').value;
+            const lines = input.split('\n');
+            
+            startTime = Date.now();
+            let lineTime = 0;
+            
+            for (let line of lines) {
+                if (line.trim()) {
+                    const rollMatch = line.match(/R:([-\d.]+)/);
+                    const targetMatch = line.match(/T:([-\d.]+)/);
+                    const actualMatch = line.match(/A:([-\d.]+)/);
+                    const errorMatch = line.match(/E:([-\d.]+)/);
+                    
+                    if (targetMatch && actualMatch) {
+                        data.time.push(lineTime);
+                        data.target.push(parseFloat(targetMatch[1]));
+                        data.actual.push(parseFloat(actualMatch[1]));
+                        data.error.push(errorMatch ? parseFloat(errorMatch[1]) * 10 : 0);
+                        data.velocity.push(0);
+                        data.voltage.push(0);
+                        
+                        lineTime += 0.2; // Assume 200ms between readings
+                    }
+                }
+            }
+            
+            updateChart();
+            calculateMetrics();
+        }
+
+        function updateChart() {
+            chart.data.datasets[0].data = data.time.map((t, i) => ({x: t, y: data.target[i]}));
+            chart.data.datasets[1].data = data.time.map((t, i) => ({x: t, y: data.actual[i]}));
+            chart.data.datasets[2].data = data.time.map((t, i) => ({x: t, y: data.error[i]}));
+            chart.update('none');
+        }
+
+        function calculateMetrics() {
+            if (data.target.length < 10) return;
+            
+            // Find step changes
+            let stepIndices = [];
+            for (let i = 1; i < data.target.length; i++) {
+                if (Math.abs(data.target[i] - data.target[i-1]) > 0.05) {
+                    stepIndices.push(i);
+                }
+            }
+            
+            if (stepIndices.length === 0) return;
+            
+            const lastStepIdx = stepIndices[stepIndices.length - 1];
+            const finalTarget = data.target[data.target.length - 1];
+            const stepSize = Math.abs(finalTarget - data.target[lastStepIdx - 1]);
+            
+            if (stepSize < 0.01) return;
+            
+            // Calculate overshoot
+            let maxOvershoot = 0;
+            for (let i = lastStepIdx; i < data.actual.length; i++) {
+                const overshoot = Math.abs(data.actual[i] - finalTarget);
+                if (overshoot > maxOvershoot) {
+                    maxOvershoot = overshoot;
+                }
+            }
+            const overshootPercent = (maxOvershoot / stepSize) * 100;
+            document.getElementById('overshoot').textContent = overshootPercent.toFixed(1) + '%';
+            
+            // Rise time (10% to 90%)
+            const target10 = data.target[lastStepIdx - 1] + stepSize * 0.1;
+            const target90 = data.target[lastStepIdx - 1] + stepSize * 0.9;
+            let rise10Idx = lastStepIdx;
+            let rise90Idx = lastStepIdx;
+            
+            for (let i = lastStepIdx; i < data.actual.length; i++) {
+                if (Math.abs(data.actual[i] - target10) < stepSize * 0.05 && rise10Idx === lastStepIdx) {
+                    rise10Idx = i;
+                }
+                if (Math.abs(data.actual[i] - target90) < stepSize * 0.05 && rise90Idx === lastStepIdx) {
+                    rise90Idx = i;
+                    break;
+                }
+            }
+            
+            const riseTime = data.time[rise90Idx] - data.time[rise10Idx];
+            document.getElementById('riseTime').textContent = riseTime.toFixed(3) + 's';
+            
+            // Settling time (within 2%)
+            let settlingIdx = data.actual.length - 1;
+            const tolerance = stepSize * 0.02;
+            for (let i = data.actual.length - 1; i >= lastStepIdx; i--) {
+                if (Math.abs(data.actual[i] - finalTarget) > tolerance) {
+                    settlingIdx = i;
+                    break;
+                }
+            }
+            const settlingTime = data.time[settlingIdx] - data.time[lastStepIdx];
+            document.getElementById('settlingTime').textContent = settlingTime.toFixed(3) + 's';
+            
+            // Steady state error
+            const lastFew = data.actual.slice(-10);
+            const avgActual = lastFew.reduce((a, b) => a + b, 0) / lastFew.length;
+            const steadyError = Math.abs(avgActual - finalTarget);
+            document.getElementById('steadyError').textContent = steadyError.toFixed(4) + ' rad';
+        }
+
+        function clearData() {
+            data = {
+                time: [],
+                target: [],
+                actual: [],
+                error: [],
+                velocity: [],
+                voltage: []
+            };
+            startTime = Date.now();
+            updateChart();
+            document.getElementById('overshoot').textContent = '-';
+            document.getElementById('settlingTime').textContent = '-';
+            document.getElementById('riseTime').textContent = '-';
+            document.getElementById('steadyError').textContent = '-';
+        }
+
+        function exportData() {
+            let csv = 'Time,Target,Actual,Error,Velocity,Voltage\n';
+            for (let i = 0; i < data.time.length; i++) {
+                csv += `${data.time[i]},${data.target[i]},${data.actual[i]},${data.error[i]/10},${data.velocity[i]},${data.voltage[i]}\n`;
+            }
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'gimbal_response_' + Date.now() + '.csv';
+            a.click();
+        }
+
+        function updateTimeWindow() {
+            timeWindow = parseInt(document.getElementById('timeWindow').value);
+        }
+
+        function logSerial(text) {
+            const log = document.getElementById('serialLog');
+            log.textContent += text + '\n';
+            log.scrollTop = log.scrollHeight;
+        }
+    </script>
+</body>
+</html>
