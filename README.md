@@ -29,7 +29,7 @@ Flight controller
 ---
 
 # Mechanical Design
-![CAD Assembly](images/gimbal_cad.png)
+![CAD Assembly](images/carbonFiberGimbal.png)
 
 A custom electromechanical housing was designed to integrate the camera payload into a Class II UAV nose cone
 
