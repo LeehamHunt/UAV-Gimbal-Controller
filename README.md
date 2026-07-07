@@ -67,7 +67,7 @@ The feedback loop consists of:
 4. Control algorithm
 5. Motor torque command
 
-![Control Diagram](images/control_loop.png)
+![Control Diagram](images/ClosedLoopDiagram.jpg)
 
 ---
 
