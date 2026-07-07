@@ -1,4 +1,5 @@
 # UAV Camera Stabilization System
+![ ](images/onTheField2.jpg)
 ## Summary
 This project involved the design and development of a single-axis UAV camera stabilization system for integration into a Class II unmanned aerial vehicle (UAV). The system combines embedded motor control, inertial sensing, encoder feedback, and flight controller communication to maintain camera orientation during flight.
 
