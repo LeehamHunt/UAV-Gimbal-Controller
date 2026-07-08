@@ -109,7 +109,7 @@ Validation included:
 - Controller tuning
 - Integration testing with flight controller telemetry
 
-![Prototype](images/prototype.jpg)
+![Prototype](images/FinishedCarbonFiber.jpg)
 
 ---
 
